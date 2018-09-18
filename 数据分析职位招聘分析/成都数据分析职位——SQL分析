@@ -1,0 +1,287 @@
+一、爬取数据
+用GooSeeker网络爬虫软件爬取智联网的成都市数据分析职位招聘数据
+在爬取前选择了公司名称、公司性质、公司规模、职位名称、工作经验、学历、职位月薪等信息作为数据字段
+二、将数据导入MySQL
+用MySQL与Navicat Premium连接后，可以直接导入Excel文件（.xls）
+三、数据清洗
+1.删除重复值（distinct）
+start transaction;
+create table workdata_new select distinct * from workdata;
+delete from workdata;
+insert into workdata select * from workdata_new;
+drop table workdata_new;
+commit;
+
+2.设置表的主键
+alter table workdata
+add column 序号 integer auto_increment primary key;
+3.缺失值处理（is null 判断空值）
+select * from workdata
+WHERE 公司名称 IS NULL OR 公司性质 IS NULL OR 公司规模 IS NULL OR
+
+职位名称 IS NULL OR 职位月薪 IS NULL OR 工作经验 IS NULL OR
+
+学历 IS NULL OR 反馈率 IS NULL;
+4.判断是否为空字符串：
+SELECT * FROM workdata
+
+WHERE 公司名称 = ''OR 公司性质 = '' OR 公司规模 = '' OR
+
+职位名称 = '' OR 职位月薪 = '' OR 工作经验 = '' OR
+
+学历 = '' OR 反馈率 = '';
+处理缺失值的方法主要有四种：通过人工手动补全、删除缺失数据、用平均值代替缺失值以及用统计模型计算的值去代替缺失值
+START TRANSACTION;
+
+CREATE TABLE workdata_new SELECT DISTINCT * FROM workdata;
+
+UPDATE workdata
+
+SET 反馈率 = (SELECT CONCAT(ROUND(AVG(
+
+CAST(LEFT(反馈率,LENGTH(反馈率)-1) AS SIGNED INTEGER)
+
+)),'%') FROM workdata_new WHERE 反馈率 != '')
+
+WHERE 序号 IN (SELECT 序号 FROM workdata_new WHERE 反馈率 = '');
+
+DROP TABLE workdata_new;
+
+COMMIT;
+UPDATE 表名称 SET 列名称 = 新值 WHERE 列名称 = 某值
+CONCAT mysql CONCAT(str1,str2,…) 函数用于将多个字符串连接成一个字符串   
+signed integer 有符号整数 
+5.一致化处理
+一致化处理就是对数据进行数据抽取，使得数据字段满足基本的数据分析需求。
+通过观察，可以发现：
+公司性质和公司规模字段中冒号前的字符串属于多余的，需要去掉
+工作经验和学历两个字段之间有些错位，需要纠正
+工作经验和学历两个字段纠正后，也存在与上述字符串多余问题，需要将其中多余的字符串去掉
+工作经验和学历两个字段纠正且去掉多余字符串后，会出现缺失值，需要填充
+职位月薪需要分裂为最高月薪和最低月薪，且要转化为数值型数据。
+
+1）公司性质和公司规模字段：
+字符串多余问题：
+公司性质列：
+UPDATE workdata
+SET 公司性质 = SUBSTR(公司性质,6);
+
+SBUSTR(str,pos); 
+就是从pos开始的位置，一直截取到最后。
+SUBSTR(str,pos,len);
+这种表示的意思是，就是从pos开始的位置，截取len个字符(空白也算字符)。 
+
+SET 公司性质 = '其他'
+WHERE 公司性质 = '' ;
+
+公司规模列：
+UPDATE workdata
+SET 公司规模 = SUBSTR(公司规模,6);
+
+由于都是学历字列错位到工作经验列，因此先更改学历列。在学历列中查找是否是学历，如果不是就用没有更改的工作经验列替换。
+
+学历列：
+UPDATE workdata
+SET 学历 = 工作经验
+WHERE LEFT(学历,2) != '学历';
+
+工作经验列：
+SET 工作经验 = '经验：不限'
+WHERE LEFT(工作经验,2) != '经验';
+
+多余字符串处理：
+
+工作经验列：
+UPDATE workdata
+SET 工作经验 = SUBSTR(工作经验,4);
+
+学历列：
+UPDATE workdata
+SET 学历 = SUBSTR(学历,4);
+
+6.将职位月薪字段
+alter table workdata add (最低薪水 integer,最高薪水 integer）
+update workdata
+set 最低薪水= cast( substring_index(职位月薪，‘-’，1）as signed integer),
+最高薪水 = cast(substring_index(职位月薪，‘-’，1) as signed integer)
+where 职位月薪！=‘面议’and 职位月薪！=‘1000元以下’               
+
+1、从左开始截取字符串 
+left（str, length） 
+说明：left（被截取字段，截取长度）
+2、从右开始截取字符串 
+right（str, length） 
+说明：right（被截取字段，截取长度） 
+3、截取字符串 
+substring（str, pos） 
+substring（str, pos, length） 
+说明：substring（被截取字段，从第几位开始截取） 
+substring（被截取字段，从第几位开始截取，截取长度）   
+4、按关键字截取字符串 
+substring_index（str,delim,count） 
+说明：substring_index（被截取字段，关键字，关键字出现的次数）                           
+
+alter table workdata add（平均月薪 varchar(255));
+update workdata  
+set 平均月薪 = cast（（最低薪水+最高薪水）/2 as char);
+UPDATE workdata
+SET 平均月薪 = 职位月薪
+WHERE 职位月薪 = '面议' OR 职位月薪 = '1000元以下';
+
+7.数据排序
+可以将平均月薪作为数据排序的标准，并且按照降序的方式进行排序
+
+8.异常值处理
+在上述数据集中，我们需要对数据分析岗位进行分析，所以需要通过职位名称来判断该职位是否是数据分析岗位。
+
+我们可以查找“职位名称”字段中是否有“产品经理”、“分析师”、“数据分析”、“商业分析”、“数据运营”、“电商运营”、“用户运营”、“数据挖掘”、“算法专家”以及“数据工程师”等字符串，若存在，则说明是数据分析岗位，反之则不是数据分析岗位，将其删除。当然，每个公司对于数据分析岗位的定义都是不尽相同的，这里的称呼只能大致概括，不能包含全部。如有错误，还请指正。
+START TRANSACTION;
+
+CREATE TABLE workdata_new1 SELECT DISTINCT * FROM workdata;
+
+DELETE FROM workdata
+
+WHERE 序号 NOT IN
+
+(SELECT 序号 FROM workdata_new1
+
+WHERE 职位名称 LIKE '%产品经理%'
+
+OR 职位名称 LIKE '%分析师%'
+
+OR 职位名称 LIKE '%数据分析%'
+
+OR 职位名称 LIKE '%商业分析%'
+
+OR 职位名称 LIKE '%数据运营%'
+
+OR 职位名称 LIKE '%电商运营%'
+
+OR 职位名称 LIKE '%用户运营%'
+
+OR 职位名称 LIKE '%数据挖掘%'
+
+OR 职位名称 LIKE '%算法专家%'
+
+OR 职位名称 LIKE '%数据工程师%');
+
+DROP TABLE workdata_new1;
+
+COMMIT;
+9、数据可视化（解决需求）
+
+1、成都市数据分析岗位的薪水如何？工作经验要求如何？
+
+1）月薪：
+
+SELECT SUM(CASE WHEN 平均月薪='面议' THEN 1 ELSE 0 END) AS 面议,
+
+SUM(CASE WHEN CAST(平均月薪 AS SIGNED INTEGER)<=2000
+
+THEN 1 ELSE 0 END) AS '2000以下',
+
+SUM(CASE WHEN CAST(平均月薪 AS SIGNED INTEGER)>2000 AND CAST(平均月薪 AS SIGNED INTEGER)<=4000
+
+THEN 1 ELSE 0 END) AS '2000-4000',
+
+SUM(CASE WHEN CAST(平均月薪 AS SIGNED INTEGER)>4000 AND CAST(平均月薪 AS SIGNED INTEGER)<=6000
+
+THEN 1 ELSE 0 END) AS '4000-6000',
+
+SUM(CASE WHEN CAST(平均月薪 AS SIGNED INTEGER)>6000 AND CAST(平均月薪 AS SIGNED INTEGER)<=8000
+
+THEN 1 ELSE 0 END) AS '6000-8000',
+
+SUM(CASE WHEN CAST(平均月薪 AS SIGNED INTEGER)>8000 AND CAST(平均月薪 AS SIGNED INTEGER)<=10000
+
+THEN 1 ELSE 0 END) AS '8000-10000',
+
+SUM(CASE WHEN CAST(平均月薪 AS SIGNED INTEGER)>10000 AND CAST(平均月薪 AS SIGNED INTEGER)<=15000
+
+THEN 1 ELSE 0 END) AS '10000-15000',
+
+SUM(CASE WHEN CAST(平均月薪 AS SIGNED INTEGER)>15000 AND CAST(平均月薪 AS SIGNED INTEGER)<=20000
+
+THEN 1 ELSE 0 END) AS '15000-20000',
+
+SUM(CASE WHEN CAST(平均月薪 AS SIGNED INTEGER)>20000 AND CAST(平均月薪 AS SIGNED INTEGER)<=30000
+
+THEN 1 ELSE 0 END) AS '20000-30000',
+
+SUM(CASE WHEN CAST(平均月薪 AS SIGNED INTEGER)>30000
+
+THEN 1 ELSE 0 END) AS '30000以上'
+
+FROM workdata;
+
+除去需要面议的平均月薪外，剩下的平均月薪进行降序排列，取出月薪工资最高的15家公司。
+SELECT 公司名称,平均月薪 FROM workdata
+
+WHERE 平均月薪 != '面议'
+
+ORDER BY CAST(平均月薪 AS SIGNED INTEGER) DESC LIMIT 15;
+2）工作经验：
+SELECT 工作经验 工作年限,COUNT(*) 公司频数 FROM workdata
+
+GROUP BY 工作经验
+
+ORDER BY 公司频数 DESC;
+10.成都市数据分析岗位的薪水和工作经验要求有何关系？
+SELECT 工作经验 工作年限,ROUND(AVG(CAST(平均月薪 AS SIGNED INTEGER))) 平均薪水 FROM workdata
+
+GROUP BY 工作经验
+
+ORDER BY 平均薪水 DESC;
+11.成都市招聘数据分析岗位的公司性质、公司规模如何？从事哪些数据分析岗位最好（从工作经验和学历两方面分析）？
+1）公司性质
+
+SELECT 公司性质,COUNT(*) 公司频数 FROM workdata
+
+GROUP BY 公司性质
+
+ORDER BY 公司频数 DESC;
+2）公司规模
+
+SELECT 公司规模,COUNT(*) 公司频数 FROM workdata
+
+GROUP BY 公司规模
+
+ORDER BY 公司频数 DESC;
+3）数据分析岗位：职位名称
+
+SELECT 职位名称,平均月薪 FROM workdata
+
+WHERE 平均月薪 != '面议'
+
+ORDER BY CAST(平均月薪 AS SIGNED INTEGER) DESC LIMIT 15;
+
+4）数据分析岗位：工作经验
+
+SELECT 学历,COUNT(*) 公司频数 FROM workdata
+
+GROUP BY 学历
+
+ORDER BY 公司频数 DESC;
+
+12.根据自己的实际情况，哪些公司的数据分析岗位适合自己？
+
+我的实际情况是：
+
+教育要求：硕士
+
+工作年限：应届毕业生
+
+预期工资：8000左右
+
+（还可以自己添加条件，具体情况具体分析）
+
+根据自己的实际情况，分析哪些公司的数据分析岗位适合自己：
+SELECT * FROM workdata
+
+WHERE (工作经验='不限' OR 工作经验='无经验' OR 工作经验='1年以下')
+
+AND (CAST(平均月薪 AS SIGNED INTEGER) >=7000
+
+AND CAST(平均月薪 AS SIGNED INTEGER) <=10000)
+
+ORDER BY CAST(平均月薪 AS SIGNED INTEGER) DESC LIMIT 20;
